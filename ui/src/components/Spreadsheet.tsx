@@ -15,7 +15,7 @@ import ApiKeyInput from "./ApiKeyInput";
 import { Source } from "./Tooltip";
 import { exportToCSV } from "../utils";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 interface SpreadsheetProps {
   data: SpreadsheetData;
@@ -140,19 +140,25 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({
   const parseExcel = (file: File): Promise<SpreadsheetData> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      
-      reader.onload = (e) => {
+
+      reader.onload = async (e) => {
         try {
-          const data = new Uint8Array(e.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: "array" });
-          
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-            header: 1,
-            defval: "",
-          }) as any[][];
+          const data = e.target?.result as ArrayBuffer;
+          const workbook = new ExcelJS.Workbook();
+          await workbook.xlsx.load(data);
+
+          const worksheet = workbook.worksheets[0];
+
+          if (!worksheet) {
+            reject(new Error("Excel file is empty"));
+            return;
+          }
+
+          const jsonData: any[][] = [];
+          worksheet.eachRow((row) => {
+            const rowValues = row.values as any[];
+            jsonData.push(rowValues.slice(1)); // slice(1) to remove the first empty element (ExcelJS rows are 1-indexed)
+          });
 
           if (jsonData.length === 0) {
             reject(new Error("Excel file is empty"));
@@ -160,12 +166,12 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({
           }
 
           const headers = jsonData[0].map((h) => String(h || "").trim());
-          
+
           if (headers.length === 0 || headers.every(h => !h)) {
             reject(new Error("Excel file has no valid headers"));
             return;
           }
-          
+
           const rows: any[][] = jsonData.length > 1
             ? jsonData.slice(1).map((row) =>
                 headers.map((_, index) => ({
